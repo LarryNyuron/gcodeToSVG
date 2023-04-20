@@ -1,8 +1,13 @@
 import svgwrite
-
-
+import numpy as np
 from scipy.interpolate import CubicSpline
-from math import sqrt, isclose
+from math import sqrt, isclose, acos
+
+
+#TODO:
+#-переписать парсинг строк для извечения координат точек в отдельный массив
+#-проверка троек из массива, если несколько троек образуют дугу, то
+# добавлять в массив, который впоследствии будет упрощать эту дугу
 
 
 def on_arc(x1, y1, x2, y2, x3, y3):
@@ -122,23 +127,100 @@ def segment(a, b):
     return [a, b]
 
 
-def cubic_spline(coords, n_samples):
+def cubic_spline(points, samples):
     """
-    coords - список координат точек [(x1, y1), (x2, y2), ...]
+    points - список координат точек [(x1, y1), (x2, y2), ...]
     n_samples - количество сэмплов для интерполяции
 
     Принимает массив координат точек и возвращает упрощенную кривую,
     представленную кубическими сплайнами
     """
-    X = [p[0] for p in coords]
-    Y = [p[1] for p in coords]
+    X = [p[0] for p in points]
+    Y = [p[1] for p in points]
 
     cs = CubicSpline(X, Y)
-    X_interp = [X[0] + (X[-1] - X[0]) * i / (n_samples - 1) for i in range(n_samples)]
+    X_interp = [X[0] + (X[-1] - X[0]) * i / (samples - 1) for i in range(samples)]
     Y_interp = [cs(x) for x in X_interp]
 
-    return [(X_interp[i], Y_interp[i]) for i in range(n_samples)]
+    return [(X_interp[i], Y_interp[i]) for i in range(samples)]
 
+
+def hermite_spline(points, samples):
+    # преобразуем точки в массивы NumPy
+    x = np.array([p[0] for p in points])
+    y = np.array([p[1] for p in points])
+
+    # задаем массив точек, на которые нужно произвести интерполяцию
+    xs = np.linspace(np.min(x), np.max(x), samples)
+
+    # вычисляем производные первого порядка
+    dx = np.gradient(x)
+    dy = np.gradient(y)
+
+    # вычисляем коэффициенты Эрмита
+    c0 = y
+    c1 = dy/dx
+    c2 = (3*dx*dy - 2*dy**2)/(dx**2)
+    c3 = (-2*dx*dy + 3*dy**2)/(dx**3)
+
+    # вычисляем значения полинома Эрмита на каждой точке
+    ys = []
+    for i in range(len(xs)):
+        j = np.argmin(np.abs(x - xs[i]))
+        if j == 0:
+            k = 0
+        elif j == len(x):
+            k = len(x) - 2
+        else:
+            k = j - 1
+
+        t = (xs[i] - x[k])/dx[k]
+        y = c0[k] + t*c1[k] + t**2*c2[k] + t**3*c3[k]
+        ys.append(y)
+
+    return np.column_stack((xs, ys))
+
+def monotone_spline(points, samples):
+    # преобразуем точки в массивы NumPy
+    x = [p[0] for p in points]
+    y = [p[1] for p in points]
+
+    # вычисляем разности между соседними x и y
+    dx = np.diff(x)
+    dy = np.diff(y)
+
+    # вычисляем градиенты (производные) на отрезках
+    grad = dy/dx
+
+    # вычисляем вторые производные
+    d2y = np.zeros_like(y)
+    d2y[:-1] += np.diff(grad)
+    d2y[1:] += np.diff(grad)
+    d2y /= dx
+
+    # обрабатываем граничные условия
+    d2y[0] = 0
+    d2y[-1] = 0
+
+    # задаем сетку для интерполяции
+    xs = np.linspace(np.min(x), np.max(x), samples)
+
+    # находим номера отрезков, в которых находятся точки
+    i = np.searchsorted(x, xs)
+    i = np.clip(i, 1, len(x) - 1) - 1
+
+    # далее мы будем использовать i для нахождения градиента и второй производной
+    xi = x[i]
+    yi = y[i]
+    gi = grad[i]
+    d2yi = d2y[i]
+
+    # вычисляем значения сплайна в точках сетки
+    t = (xs - xi)/dx[i]
+    ys = yi + t*gi + (t**2 - t)*d2yi
+
+    # возвращаем результат
+    return np.column_stack((xs, ys))
 
 # Открыть файл с G-кодом для чтения
 with open('input.gcode', 'r') as f:
@@ -171,3 +253,7 @@ with open('input.gcode', 'r') as f:
 
     # Сохранение SVG-документа
     dwg.save()
+
+
+if __name__ == '__main__':
+    pass
